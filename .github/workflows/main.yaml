@@ -1,0 +1,66 @@
+name: Sign EXE and Create Signed Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  sign_exe:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v2
+
+      - name: Setup Software Trust Manager (new)
+        id: stm-setup
+        uses: digicert/code-signing-software-trust-action@v1.0.0 # latest released version
+
+
+      - name: Set up certificate 
+        run: | 
+          echo "${{ secrets.SM_CLIENT_CERT_FILE_B64 }}" | base64 --decode > /tmp/Certificate_pkcs12.p12 
+        shell: bash  
+        
+      - name: Set variables 
+        id: variables 
+        run: | 
+          echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT 
+          echo "SM_HOST=${{ secrets.SM_HOST }}" >> "$GITHUB_ENV" 
+          echo "SM_API_KEY=${{ secrets.SM_API_KEY }}" >> "$GITHUB_ENV" 
+          echo "SM_CLIENT_CERT_FILE=/tmp/Certificate_pkcs12.p12" >> "$GITHUB_ENV" 
+          echo "SM_CLIENT_CERT_PASSWORD=${{ secrets.SM_CLIENT_CERT_PASSWORD }}" >> "$GITHUB_ENV" 
+        shell: bash
+    
+      - name: Download release asset
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}  
+        run: |
+          # Download the exe from the latest release
+          gh release download --pattern "MunimApp.exe" --dir ./downloaded_asset
+
+
+      - name: Sign the EXE file
+        run: |
+          smctl sign --simple --keypair-alias ${{ secrets.SM_KEYPAIR_ALIAS }} --input ./downloaded_asset/MunimApp.exe 
+
+      - name: Upload signed EXE to the existing release
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+        run: |
+          # Get the latest release tag
+          RELEASE_TAG=$(gh release view --json tagName -q ".tagName")
+          echo "Found release tag: $RELEASE_TAG"
+          
+          # Upload the signed EXE back to the existing release
+          gh release upload $RELEASE_TAG ./downloaded_asset/MunimApp.exe --clobber
+          
+          echo "Signed EXE uploaded successfully to release: $RELEASE_TAG"
+          
+          # Update the release notes with the signed EXE message
+          gh release edit $RELEASE_TAG --notes "Signed EXE has been uploaded successfully. Version: $RELEASE_TAG."
+          
+          echo "Release notes updated with the 'signed EXE uploaded' message."
+
+
